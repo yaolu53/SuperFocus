@@ -20,6 +20,7 @@ from catalyst.utils import set_global_seed
 import MLP
 
 from processing_image_features import process_image_features
+from sklearn.model_selection import train_test_split
 
 
 class HierarchicalDataset(Dataset):
@@ -94,7 +95,7 @@ def gene_loss(preds, num_cells, group_id, dataset):
 
 def training(adata, pt_model_dir: str, radius, refine_factor, feature_pd_dir, trained_model_dir, save_model_dir,
              hidden_dims=[2048, 2048, 1024, 1024],
-             activations=None, residual=False, norm=False, include_tanhshrink=False, sample_id=None):
+             activations=None, residual=False, norm=False, include_tanhshrink=False, sample_id=None, training_mode=None, kfold=5):
     codex_marker_array, counts_marker_array, other_marker_array = process_image_features(adata, pt_model_dir, radius,
                                                                                          refine_factor)
     adata_raw = adata
@@ -120,8 +121,31 @@ def training(adata, pt_model_dir: str, radius, refine_factor, feature_pd_dir, tr
 
     cellvit_marker_array = np.hstack((codex_marker_array_sub, counts_marker_array_sub))
 
-    ind_x_train = range(gene_exp.shape[0])
-    y_train = gene_exp
+    if training_mode is None:
+        ind_x_train = range(gene_exp.shape[0])
+        y_train = gene_exp
+    elif training_mode == 'Full':
+        ind_x_train, ind_x_test, y_train, y_test = train_test_split(range(gene_exp.shape[0]), gene_exp, test_size=0.2,
+                                                                    random_state=123)
+    elif training_mode == 'Half':
+        dbit_row_index = [int(x.split('-')[0]) for x in dbit_pd_sub.index]
+        dbit_col_index = [int(x.split('-')[1]) for x in dbit_pd_sub.index]
+        selected_train = [x % 2 == 1 for x in dbit_col_index]
+        selected_test = [x % 2 == 0 for x in dbit_col_index]
+
+        ind_x_train = np.where(selected_train)[0]
+        ind_x_test = np.where(selected_test)[0]
+        y_train = gene_exp[selected_train, :]
+        y_test = gene_exp[selected_test, :]
+    elif training_mode == 'Quarter':
+        dbit_row_index = [int(x.split('-')[0]) for x in dbit_pd_sub.index]
+        dbit_col_index = [int(x.split('-')[1]) for x in dbit_pd_sub.index]
+        selected_train = [(x % 2 == 1) * (y % 2 == 1) for (x, y) in zip(dbit_col_index, dbit_row_index)]
+        selected_test = [(x % 2 == 0) + (y % 2 == 0) for (x, y) in zip(dbit_col_index, dbit_row_index)]
+        ind_x_train = np.where(selected_train)[0]
+        ind_x_test = np.where(selected_test)[0]
+        y_train = gene_exp[selected_train, :]
+        y_test = gene_exp[selected_test, :]
 
     barcodes_train_unique = np.array(dbit_pd_sub.index[ind_x_train])
     ind_train_coord = [i for i in range(other_marker_array_sub.shape[0]) if

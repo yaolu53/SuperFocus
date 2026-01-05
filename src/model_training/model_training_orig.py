@@ -15,10 +15,11 @@ from sklearn.model_selection import KFold
 from catalyst.utils import set_global_seed
 
 from processing_image_features import process_image_features
+from sklearn.model_selection import train_test_split
 
 
 def training_orig(adata, pt_model_dir: str, radius, feature_list, save_model_dir, hidden_dims=[2048, 2048, 1024, 1024],
-                  activations=None, residual=False, norm=False, include_tanhshrink=False, sample_id=None):
+                  activations=None, residual=False, norm=False, include_tanhshrink=False, sample_id=None, training_mode=None, kfold=5):
     codex_marker_array, counts_marker_array, other_marker_array = process_image_features(adata, pt_model_dir, radius, 1)
 
     adata_raw = adata
@@ -48,11 +49,50 @@ def training_orig(adata, pt_model_dir: str, radius, feature_list, save_model_dir
 
     cellvit_marker_array = np.hstack((codex_marker_array_sub, counts_marker_array_sub))
 
-    x_train = cellvit_marker_array
-    y_train = gene_exp
+    if training_mode is None:
+        x_train = cellvit_marker_array
+        y_train = gene_exp
 
-    train_coordx = np.array(other_marker_array_sub.loc[:, 'pxl_col_in_fullres'])
-    train_coordy = np.array(other_marker_array_sub.loc[:, 'pxl_row_in_fullres'])
+        train_coordx = np.array(other_marker_array_sub.loc[:, 'pxl_col_in_fullres'])
+        train_coordy = np.array(other_marker_array_sub.loc[:, 'pxl_row_in_fullres'])
+    elif training_mode == 'Full':
+        x_train, x_test, y_train, y_test = train_test_split(cellvit_marker_array, gene_exp, test_size=0.3,
+                                                            random_state=123)
+        train_coordx, test_coordx, train_coordy, test_coordy = train_test_split(
+            np.array(other_marker_array_sub.loc[:, 'pxl_col_in_fullres']),
+            np.array(other_marker_array_sub.loc[:, 'pxl_row_in_fullres']), test_size=0.3, random_state=123)
+    elif training_mode == 'Half':
+        x_train = cellvit_marker_array[other_marker_array_sub.array_col % 2 == 1, :]
+        x_test = cellvit_marker_array[other_marker_array_sub.array_col % 2 == 0, :]
+        y_train = gene_exp[other_marker_array_sub.array_col % 2 == 1, :]
+        y_test = gene_exp[other_marker_array_sub.array_col % 2 == 0, :]
+
+        train_coordx = np.array(other_marker_array_sub.loc[:, 'pxl_col_in_fullres'])[
+            other_marker_array_sub.array_col % 2 == 1]
+        test_coordx = np.array(other_marker_array_sub.loc[:, 'pxl_col_in_fullres'])[
+            other_marker_array_sub.array_col % 2 == 0]
+        train_coordy = np.array(other_marker_array_sub.loc[:, 'pxl_row_in_fullres'])[
+            other_marker_array_sub.array_col % 2 == 1]
+        test_coordy = np.array(other_marker_array_sub.loc[:, 'pxl_row_in_fullres'])[
+            other_marker_array_sub.array_col % 2 == 0]
+    elif training_mode == 'Quarter':
+        x_train = cellvit_marker_array[
+                  (other_marker_array_sub.array_col % 2 == 1) * (other_marker_array_sub.array_row % 2 == 1), :]
+        x_test = cellvit_marker_array[
+                 (other_marker_array_sub.array_col % 2 == 0) + (other_marker_array_sub.array_row % 2 == 0), :]
+        y_train = gene_exp[(other_marker_array_sub.array_col % 2 == 1) * (other_marker_array_sub.array_row % 2 == 1), :]
+        y_test = gene_exp[(other_marker_array_sub.array_col % 2 == 0) + (other_marker_array_sub.array_row % 2 == 0), :]
+
+        train_coordx = np.array(other_marker_array_sub.loc[:, 'pxl_col_in_fullres'])[
+            (other_marker_array_sub.array_col % 2 == 1) * (other_marker_array_sub.array_row % 2 == 1)]
+        test_coordx = np.array(other_marker_array_sub.loc[:, 'pxl_col_in_fullres'])[
+            (other_marker_array_sub.array_col % 2 == 0) + (other_marker_array_sub.array_row % 2 == 0)]
+        train_coordy = np.array(other_marker_array_sub.loc[:, 'pxl_row_in_fullres'])[
+            (other_marker_array_sub.array_col % 2 == 1) * (other_marker_array_sub.array_row % 2 == 1)]
+        test_coordy = np.array(other_marker_array_sub.loc[:, 'pxl_row_in_fullres'])[
+            (other_marker_array_sub.array_col % 2 == 0) + (other_marker_array_sub.array_row % 2 == 0)]
+
+
 
     CODEX_HIST_scaler = MinMaxScaler(feature_range=(0, 1))
     CODEX_HIST_scaler.fit(x_train)
@@ -65,7 +105,7 @@ def training_orig(adata, pt_model_dir: str, radius, feature_list, save_model_dir
     with open(f'./{sample_id}_scaler_refine_level1.pickle', 'wb') as file:
         pickle.dump(CODEX_HIST_scaler, file)
 
-    kf = KFold(n_splits=3, random_state=123, shuffle=True)
+    kf = KFold(n_splits=kfold, random_state=123, shuffle=True)
     fold_metrics = []
     dataset = TensorDataset(torch.tensor(x_train_scaled).to(torch.float32), torch.tensor(y_train).to(torch.float32))
 
