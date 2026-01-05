@@ -95,7 +95,7 @@ def gene_loss(preds, num_cells, group_id, dataset):
 
 def training(adata, pt_model_dir: str, radius, refine_factor, feature_pd_dir, trained_model_dir, save_model_dir,
              hidden_dims=[2048, 2048, 1024, 1024],
-             activations=None, residual=False, norm=False, include_tanhshrink=False, sample_id=None, training_mode=None, kfold=5):
+             activations=None, residual=False, norm=False, out_act= nn.ReLU(), include_tanhshrink=False, sample_id=None, training_mode=None, kfold=5):
     codex_marker_array, counts_marker_array, other_marker_array = process_image_features(adata, pt_model_dir, radius,
                                                                                          refine_factor)
     adata_raw = adata
@@ -184,7 +184,7 @@ def training(adata, pt_model_dir: str, radius, refine_factor, feature_pd_dir, tr
     kf = KFold(n_splits=3, shuffle=True, random_state=42)
 
     ## set up optimizer and loss
-    model = MLP.Model(x_train.shape[-1], y_train.shape[-1], hidden_dims, activations, residual, norm,
+    model = MLP.Model(x_train.shape[-1], y_train.shape[-1], hidden_dims, activations, residual, norm, out_act,
                       include_tanhshrink)
     model.load_state_dict(torch.load(
         trained_model_dir,

@@ -19,7 +19,7 @@ from sklearn.model_selection import train_test_split
 
 
 def training_orig(adata, pt_model_dir: str, radius, feature_list, save_model_dir, hidden_dims=[2048, 2048, 1024, 1024],
-                  activations=None, residual=False, norm=False, include_tanhshrink=False, sample_id=None, training_mode=None, kfold=5):
+                  activations=None, residual=False, norm=False, out_act= nn.ReLU(), include_tanhshrink=False, sample_id=None, training_mode=None, kfold=5):
     codex_marker_array, counts_marker_array, other_marker_array = process_image_features(adata, pt_model_dir, radius, 1)
 
     adata_raw = adata
@@ -113,7 +113,7 @@ def training_orig(adata, pt_model_dir: str, radius, feature_list, save_model_dir
     set_global_seed(123)
 
     ## set up optimizer and loss
-    model = MLP.Model(x_train.shape[-1], y_train.shape[-1], hidden_dims, activations, residual, norm,
+    model = MLP.Model(x_train.shape[-1], y_train.shape[-1], hidden_dims, activations, residual, norm, out_act,
                       include_tanhshrink)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-5)
     criterion = torch.nn.MSELoss()
