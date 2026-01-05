@@ -10,8 +10,9 @@ import matplotlib.pyplot as plt
 import torch
 from src.model_training import MLP
 import anndata as ad
+from muon import atac as ac
 
-def post_procesing(model_dir=None, hidden_dims=[2048, 2048, 1024, 1024], activations=None, residual=False, norm=False, include_tanhshrink=False, data_dir=None, gene_list=None, regress_out=False, resolutions=[0.6, 0.8],
+def post_procesing(model_dir=None, hidden_dims=[2048, 2048, 1024, 1024], activations=None, residual=False, norm=False, include_tanhshrink=False, data_dir=None, feature_list=None, datatype='RNA', regress_out=False, resolutions=[0.6, 0.8],
                    refine_factor=1, sample_id=None, radius=116.8):
     with open(data_dir, 'rb') as file:
         x_train, y_train, train_coordx, train_coordy, x_train_scaled = pickle.load(file)
@@ -33,7 +34,7 @@ def post_procesing(model_dir=None, hidden_dims=[2048, 2048, 1024, 1024], activat
     adata = ad.AnnData(predicted_gene)  # ad.AnnData(sparse.csc_matrix(predicted_gene))
 
     # adata.obs_names = list(dbit_pd.index)
-    adata.var_names = gene_list  # list(dbit_pd.columns)
+    adata.var_names = feature_list  # list(dbit_pd.columns)
 
     adata.obs['x'] = train_coordx
     adata.obs['y'] = train_coordy
@@ -41,19 +42,32 @@ def post_procesing(model_dir=None, hidden_dims=[2048, 2048, 1024, 1024], activat
 
     adata.layers['counts'] = predicted_gene.copy()
 
-    sc.pp.calculate_qc_metrics(adata, inplace=True, log1p=True)
+    if datatype =='RNA':
+        sc.pp.calculate_qc_metrics(adata, inplace=True, log1p=True)
 
-    if regress_out:
-        # regress out unwanted variables
-        sc.pp.regress_out(adata, ['total_counts'])
+        if regress_out:
+            # regress out unwanted variables
+            sc.pp.regress_out(adata, ['total_counts'])
 
-    # scale data, clip values exceeding standard deviation 10.
-    sc.pp.scale(adata, max_value=10)
+        # scale data, clip values exceeding standard deviation 10.
+        sc.pp.scale(adata, max_value=10)
 
-    sc.tl.pca(adata, svd_solver='arpack')
+        sc.tl.pca(adata, svd_solver='arpack')
 
-    sc.pp.neighbors(adata, n_neighbors=50, n_pcs=20, use_rep='X_pca', random_state=0)
-    sc.tl.umap(adata, random_state=0)
+        sc.pp.neighbors(adata, n_neighbors=50, n_pcs=20, use_rep='X_pca', random_state=0)
+        sc.tl.umap(adata, random_state=0)
+
+    elif datatype =='ATAC':
+        ac.pp.tfidf(adata, scale_factor=1e4)
+        sc.pp.normalize_per_cell(adata, counts_per_cell_after=1e4)
+        sc.pp.log1p(adata)
+        ac.tl.lsi(adata)
+        adata.obsm['X_lsi'] = adata.obsm['X_lsi'][:, 1:]
+        adata.varm["LSI"] = adata.varm["LSI"][:, 1:]
+        adata.uns["lsi"]["stdev"] = adata.uns["lsi"]["stdev"][1:]
+
+        sc.pp.neighbors(adata, use_rep="X_lsi", n_neighbors=25, n_pcs=30, random_state=0)
+        sc.tl.umap(adata, random_state=0)
 
     for res in resolutions:
         sc.tl.leiden(adata, resolution=res, key_added=f"leiden_res_{res}", random_state=0, flavor='igraph', n_iterations=2)
