@@ -12,14 +12,23 @@ from src.model_training import MLP
 import anndata as ad
 from muon import atac as ac
 
-def post_procesing(model_dir=None, hidden_dims=[2048, 2048, 1024, 1024], activations=None, residual=False, norm=False, include_tanhshrink=False, data_dir=None, feature_list=None, datatype='RNA', regress_out=False, resolutions=[0.6, 0.8],
+def post_procesing(model_dir=None, hidden_dims=[2048, 2048, 1024, 1024], activations=None, out_act=None, residual=False, norm=False, selected_model=None, include_tanhshrink=False, data_dir=None, feature_list=None, datatype='RNA', regress_out=False, resolutions=[0.6, 0.8],
                    refine_factor=1, sample_id=None, radius=116.8):
     with open(data_dir, 'rb') as file:
-        x_train, y_train, train_coordx, train_coordy, x_train_scaled = pickle.load(file)
+        x_train, y_train, train_coordx, train_coordy, x_train_scaled, _ = pickle.load(file)
 
-    model = MLP.Model(x_train_scaled.shape[-1], y_train.shape[-1], hidden_dims, activations, residual, norm,
-                      include_tanhshrink)
-    state_dict = torch.load(f'./logs_{sample_id}_repdoduce/checkpoints/model.best.pth',
+    if selected_model is None:
+        model = MLP.Model(n_inp=x_train.shape[-1], n_out=y_train.shape[-1], hidden_dims=hidden_dims,
+                          activations=activations, residual=residual, norm=norm, out_activation=out_act,
+                          include_tanhshrink=include_tanhshrink)
+    elif selected_model == 'lite':
+        model = MLP.Model_lite(n_inp=x_train.shape[-1], n_out=y_train.shape[-1], hidden_dims=hidden_dims,
+                               activations=activations, out_activation=out_act)
+    elif selected_model == 'lite_shrink':
+        model = MLP.Model_lite_shrink(n_inp=x_train.shape[-1], n_out=y_train.shape[-1], hidden_dims=hidden_dims,
+                                      activations=activations, out_activation=out_act)
+
+    state_dict = torch.load(f'./logs_{sample_id}_reproduce/checkpoints/model.best.pth',
                             map_location=torch.device('cpu'))  # Load on CPU
     model.load_state_dict(state_dict)
 

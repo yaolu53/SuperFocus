@@ -1,4 +1,5 @@
 import torch
+from torch import nn
 
 import sys
 import os
@@ -17,9 +18,9 @@ from sklearn.model_selection import KFold
 
 from catalyst.utils import set_global_seed
 
-import MLP
+from src.model_training import MLP
 
-from processing_image_features import process_image_features
+from src.model_training.processing_image_features import process_image_features
 from sklearn.model_selection import train_test_split
 
 
@@ -94,10 +95,11 @@ def gene_loss(preds, num_cells, group_id, dataset):
 
 
 def training(adata, pt_model_dir: str, radius, refine_factor, feature_pd_dir, trained_model_dir, save_model_dir,
-             hidden_dims=[2048, 2048, 1024, 1024],
-             activations=None, residual=False, norm=False, out_act= nn.ReLU(), include_tanhshrink=False, sample_id=None, training_mode=None, kfold=5):
+             hidden_dims=[2048, 2048, 1024, 1024], activations=None, residual=False, norm=False, out_act= nn.ReLU(),
+             include_tanhshrink=False, sample_id=None, selected_model=None, training_mode=None, kfold=5, cell_embed_dir=None,
+             lr=1e-7, step_size=50, gamma=0.5, num_epochs=50, random_state=123, sort_way='row_col', datatype='Visium'):
     codex_marker_array, counts_marker_array, other_marker_array = process_image_features(adata, pt_model_dir, radius,
-                                                                                         refine_factor)
+                                                                                         refine_factor, cell_embed_dir, sort_way)
     adata_raw = adata
     adata_raw.layers['counts'] = adata_raw.X.copy()
     adata_raw.var_names_make_unique()
@@ -110,10 +112,13 @@ def training(adata, pt_model_dir: str, radius, refine_factor, feature_pd_dir, tr
     dbit_pd = dbit_pd.loc[barcodes, :]
 
     selected_refined_spots = counts_marker_array[:, 0] != 0
-    selected_barcodes = np.unique(np.array(other_marker_array['Barcode'])[selected_refined_spots])
+    selected_barcodes = np.intersect1d(np.unique(np.array(other_marker_array['Barcode'])[selected_refined_spots]), dbit_pd.index)
     dbit_pd_sub = dbit_pd.loc[selected_barcodes,]
 
     gene_exp = np.array(dbit_pd_sub)
+
+    if datatype == 'dbit':
+        selected_refined_spots = [True if np.array(other_marker_array.Barcode)[i] in selected_barcodes and counts_marker_array[i, 0]!=0 else False for i in range(other_marker_array.shape[0])]
 
     counts_marker_array_sub = counts_marker_array[selected_refined_spots, :]
     codex_marker_array_sub = codex_marker_array[selected_refined_spots, :]
@@ -126,6 +131,9 @@ def training(adata, pt_model_dir: str, radius, refine_factor, feature_pd_dir, tr
         y_train = gene_exp
     elif training_mode == 'Full':
         ind_x_train, ind_x_test, y_train, y_test = train_test_split(range(gene_exp.shape[0]), gene_exp, test_size=0.2,
+                                                                    random_state=123)
+    elif training_mode == 'Full_2':
+        ind_x_train, ind_x_test, y_train, y_test = train_test_split(range(gene_exp.shape[0]), gene_exp, test_size=0.1,
                                                                     random_state=123)
     elif training_mode == 'Half':
         dbit_row_index = [int(x.split('-')[0]) for x in dbit_pd_sub.index]
@@ -147,9 +155,16 @@ def training(adata, pt_model_dir: str, radius, refine_factor, feature_pd_dir, tr
         y_train = gene_exp[selected_train, :]
         y_test = gene_exp[selected_test, :]
 
+    #barcodes_train_unique = np.array(dbit_pd_sub.index[ind_x_train])
+    #ind_train_coord = [i for i in range(other_marker_array_sub.shape[0]) if
+    #                   other_marker_array_sub.iloc[i, 0] in barcodes_train_unique]
+
     barcodes_train_unique = np.array(dbit_pd_sub.index[ind_x_train])
+    #barcodes_test_unique = np.array(dbit_pd_sub.index[ind_x_test])
     ind_train_coord = [i for i in range(other_marker_array_sub.shape[0]) if
                        other_marker_array_sub.iloc[i, 0] in barcodes_train_unique]
+    #ind_test_coord = [i for i in range(other_marker_array_sub.shape[0]) if
+    #                  other_marker_array_sub.iloc[i, 0] in barcodes_test_unique]
 
     print('number of selected original spots in training: ', len(barcodes_train_unique))
     print('number of selected refined spots in training: ', len(ind_train_coord))
@@ -181,17 +196,22 @@ def training(adata, pt_model_dir: str, radius, refine_factor, feature_pd_dir, tr
 
     coarse_ids = list(dataset.coarse_groups.keys())
 
-    kf = KFold(n_splits=3, shuffle=True, random_state=42)
+    kf = KFold(n_splits=kfold, shuffle=True, random_state=random_state)
 
     ## set up optimizer and loss
-    model = MLP.Model(x_train.shape[-1], y_train.shape[-1], hidden_dims, activations, residual, norm, out_act,
-                      include_tanhshrink)
+    if selected_model is None:
+        model = MLP.Model(n_inp=x_train.shape[-1], n_out=y_train.shape[-1], hidden_dims=hidden_dims, activations=activations, residual=residual, norm=norm, out_activation=out_act, include_tanhshrink=include_tanhshrink)
+    elif selected_model == 'lite':
+        model = MLP.Model_lite(n_inp=x_train.shape[-1], n_out=y_train.shape[-1], hidden_dims=hidden_dims, activations=activations, out_activation=out_act)
+    elif selected_model == 'lite_shrink':
+        model = MLP.Model_lite_shrink(n_inp=x_train.shape[-1], n_out=y_train.shape[-1], hidden_dims=hidden_dims,
+                               activations=activations, out_activation=out_act)
     model.load_state_dict(torch.load(
         trained_model_dir,
         map_location=torch.device('cpu')))
     # model.load_state_dict(torch.load('./logs_all_genes_HumanKidney_Visium_HD_64um_counts_normal_hvg1000_2x/best_model_fold5.pth', map_location=torch.device('cpu')))
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-7)
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=50, gamma=0.5)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=step_size, gamma=gamma)
 
     # Set global random seed
     set_global_seed(123)
@@ -211,7 +231,7 @@ def training(adata, pt_model_dir: str, radius, refine_factor, feature_pd_dir, tr
         val_loader = DataLoader(dataset, batch_sampler=val_sampler, collate_fn=collate_fn)
         best_val_loss = float("inf")
 
-        for epoch in range(50):  # keep short for demo
+        for epoch in range(num_epochs):  # keep short for demo
             model.train()
             for x_batch, y_batch, num_cells, group_id in train_loader:
                 preds = model(x_batch)
@@ -236,3 +256,5 @@ def training(adata, pt_model_dir: str, radius, refine_factor, feature_pd_dir, tr
                 torch.save(model.state_dict(),
                            f"{save_model_dir}/best_model_fold{fold + 1}.pth")
                 print(f"Saved best model for fold {fold + 1} at epoch {epoch + 1}")
+
+            scheduler.step()

@@ -1,4 +1,5 @@
 import torch
+from torch import nn
 
 from torch.utils.data import DataLoader, Subset, TensorDataset
 
@@ -8,19 +9,21 @@ import pickle
 import scanpy as sc
 from sklearn.preprocessing import MinMaxScaler
 
-from runner import CustomRunner
-import MLP
+from src.model_training.runner import CustomRunner
+from src.model_training import MLP
 
 from sklearn.model_selection import KFold
 from catalyst.utils import set_global_seed
 
-from processing_image_features import process_image_features
+from src.model_training.processing_image_features import process_image_features
 from sklearn.model_selection import train_test_split
 
 
+
 def training_orig(adata, pt_model_dir: str, radius, feature_list, save_model_dir, hidden_dims=[2048, 2048, 1024, 1024],
-                  activations=None, residual=False, norm=False, out_act= nn.ReLU(), include_tanhshrink=False, sample_id=None, training_mode=None, kfold=5):
-    codex_marker_array, counts_marker_array, other_marker_array = process_image_features(adata, pt_model_dir, radius, 1)
+                  activations=None, residual=False, norm=False, out_act= nn.ReLU(), include_tanhshrink=False,
+                  sample_id=None, training_mode=None, selected_model=None, kfold=5, cell_embed_dir=None, num_epochs=50, sort_way='row_col', datatype='Visium'):
+    codex_marker_array, counts_marker_array, other_marker_array = process_image_features(adata, pt_model_dir, radius, 1, cell_embed_dir, sort_way)
 
     adata_raw = adata
     adata_raw.layers['counts'] = adata_raw.X.copy()
@@ -44,10 +47,23 @@ def training_orig(adata, pt_model_dir: str, radius, feature_list, save_model_dir
     codex_marker_array_sub = codex_marker_array[spots_selected, :]
     other_marker_array_sub = other_marker_array.iloc[spots_selected, :]
 
-    dbit_pd_sub = dbit_pd.iloc[spots_selected, :]
+    if datatype == 'dbit':
+        selected_spots = np.array(other_marker_array_sub.Barcode)
+        selected_spots_final = [spot for spot in selected_spots if spot in dbit_pd.index]
+        selected_spots_final_index = [i for i in range(len(selected_spots)) if selected_spots[i] in dbit_pd.index]
+        dbit_pd_sub = dbit_pd.loc[selected_spots_final, :].copy()
+
+        other_marker_array_sub = other_marker_array_sub.iloc[selected_spots_final_index, :]
+        codex_marker_array_sub = codex_marker_array_sub[selected_spots_final_index, :]
+        counts_marker_array_sub = counts_marker_array_sub[selected_spots_final_index, :]
+    else:
+        dbit_pd_sub = dbit_pd.iloc[spots_selected, :]
+
     gene_exp = np.array(dbit_pd_sub) / counts_marker_array_sub[:, 0][:, None]
 
     cellvit_marker_array = np.hstack((codex_marker_array_sub, counts_marker_array_sub))
+
+    print(cellvit_marker_array.shape)
 
     if training_mode is None:
         x_train = cellvit_marker_array
@@ -56,11 +72,20 @@ def training_orig(adata, pt_model_dir: str, radius, feature_list, save_model_dir
         train_coordx = np.array(other_marker_array_sub.loc[:, 'pxl_col_in_fullres'])
         train_coordy = np.array(other_marker_array_sub.loc[:, 'pxl_row_in_fullres'])
     elif training_mode == 'Full':
-        x_train, x_test, y_train, y_test = train_test_split(cellvit_marker_array, gene_exp, test_size=0.3,
-                                                            random_state=123)
+        x_train, x_test, y_train, y_test = train_test_split(cellvit_marker_array, gene_exp, test_size=0.3, random_state=123)
         train_coordx, test_coordx, train_coordy, test_coordy = train_test_split(
             np.array(other_marker_array_sub.loc[:, 'pxl_col_in_fullres']),
             np.array(other_marker_array_sub.loc[:, 'pxl_row_in_fullres']), test_size=0.3, random_state=123)
+    elif training_mode == 'Full_2':
+        x_train, x_test, y_train, y_test = train_test_split(cellvit_marker_array, gene_exp, test_size=0.2, random_state=123)
+        train_coordx, test_coordx, train_coordy, test_coordy = train_test_split(
+            np.array(other_marker_array_sub.loc[:, 'pxl_col_in_fullres']),
+            np.array(other_marker_array_sub.loc[:, 'pxl_row_in_fullres']), test_size=0.2, random_state=123)
+    elif training_mode == 'Full_3':
+        x_train, x_test, y_train, y_test = train_test_split(cellvit_marker_array, gene_exp, test_size=0.1, random_state=123)
+        train_coordx, test_coordx, train_coordy, test_coordy = train_test_split(
+            np.array(other_marker_array_sub.loc[:, 'pxl_col_in_fullres']),
+            np.array(other_marker_array_sub.loc[:, 'pxl_row_in_fullres']), test_size=0.1, random_state=123)
     elif training_mode == 'Half':
         x_train = cellvit_marker_array[other_marker_array_sub.array_col % 2 == 1, :]
         x_test = cellvit_marker_array[other_marker_array_sub.array_col % 2 == 0, :]
@@ -113,8 +138,12 @@ def training_orig(adata, pt_model_dir: str, radius, feature_list, save_model_dir
     set_global_seed(123)
 
     ## set up optimizer and loss
-    model = MLP.Model(x_train.shape[-1], y_train.shape[-1], hidden_dims, activations, residual, norm, out_act,
-                      include_tanhshrink)
+    if selected_model is None:
+        model = MLP.Model(n_inp=x_train.shape[-1], n_out=y_train.shape[-1], hidden_dims=hidden_dims, activations=activations, residual=residual, norm=norm, out_activation=out_act, include_tanhshrink=include_tanhshrink)
+    elif selected_model == 'lite':
+        model = MLP.Model_lite(n_inp=x_train.shape[-1], n_out=y_train.shape[-1], hidden_dims=hidden_dims, activations=activations, out_activation=out_act)
+    elif selected_model == 'lite_shrink':
+        model = MLP.Model_lite_shrink(n_inp=x_train.shape[-1], n_out=y_train.shape[-1], hidden_dims=hidden_dims, activations=activations, out_activation=out_act)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-5)
     criterion = torch.nn.MSELoss()
 
@@ -132,7 +161,7 @@ def training_orig(adata, pt_model_dir: str, radius, feature_list, save_model_dir
             optimizer=optimizer,
             criterion=criterion,
             loaders={"train": train_loader, "valid": val_loader},
-            num_epochs=50,
+            num_epochs=num_epochs,
             # callbacks=callbacks_list,
             logdir=save_model_dir,
             valid_loader="valid",
