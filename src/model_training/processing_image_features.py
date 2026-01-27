@@ -328,13 +328,23 @@ def process_image_features(adata, pt_model_dir: str, radius: float, refine_facto
         return visium_cell_markers, visium_cell_counts, visium_coords_repeat
 
 
-def whole_image_all_cells_features(pt_model_dir: str, radius: float):
-    cell_centroid_0, cell_centroid_1 = cell_positions(pt_model_dir)
+def whole_image_all_cells_features(pt_model_dir: str, radius: float, cell_embed_dir=None):
+    if cell_embed_dir is None:
+        cell_embed_df = process_embedding(pt_model_dir)
+        cell_centroid_0, cell_centroid_1 = cell_positions(pt_model_dir)
+        cell_embed_df['x'] = cell_centroid_0
+        cell_embed_df['y'] = cell_centroid_1
+    else:
+        with open(cell_embed_dir, 'rb') as handle:
+            cell_embed_df = pickle.load(handle)
+        cell_centroid_0 = cell_embed_df['x']
+        cell_centroid_1 = cell_embed_df['y']
+    #cell_centroid_0, cell_centroid_1 = cell_positions(pt_model_dir)
     cell_pos_df = pd.DataFrame({'x': cell_centroid_0, 'y': cell_centroid_1})
 
-    cell_embed_df = process_embedding(pt_model_dir)
-    cell_embed_df['x'] = cell_centroid_0
-    cell_embed_df['y'] = cell_centroid_1
+    #cell_embed_df = process_embedding(pt_model_dir)
+    #cell_embed_df['x'] = cell_centroid_0
+    #cell_embed_df['y'] = cell_centroid_1
 
     cell_coords = pd.DataFrame({'Barcode': range(len(cell_centroid_0)), 'pxl_row_in_fullres': cell_centroid_1,
                                 'pxl_col_in_fullres': cell_centroid_0})

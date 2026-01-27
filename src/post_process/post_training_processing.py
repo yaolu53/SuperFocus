@@ -28,8 +28,7 @@ def post_procesing(model_dir=None, hidden_dims=[2048, 2048, 1024, 1024], activat
         model = MLP.Model_lite_shrink(n_inp=x_train.shape[-1], n_out=y_train.shape[-1], hidden_dims=hidden_dims,
                                       activations=activations, out_activation=out_act)
 
-    state_dict = torch.load(f'./logs_{sample_id}_reproduce/checkpoints/model.best.pth',
-                            map_location=torch.device('cpu'))  # Load on CPU
+    state_dict = torch.load(model_dir, map_location=torch.device('cpu'))  # Load on CPU
     model.load_state_dict(state_dict)
 
     model.eval()
@@ -53,6 +52,9 @@ def post_procesing(model_dir=None, hidden_dims=[2048, 2048, 1024, 1024], activat
 
     if datatype =='RNA':
         sc.pp.calculate_qc_metrics(adata, inplace=True, log1p=True)
+
+        sc.pp.normalize_total(adata, target_sum=1e4)
+        sc.pp.log1p(adata)
 
         if regress_out:
             # regress out unwanted variables

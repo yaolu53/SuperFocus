@@ -126,6 +126,9 @@ def training(adata, pt_model_dir: str, radius, refine_factor, feature_pd_dir, tr
 
     cellvit_marker_array = np.hstack((codex_marker_array_sub, counts_marker_array_sub))
 
+    with open(f'./{sample_id}_full_data_level{refine_factor}.pickle', 'wb') as file:
+        pickle.dump((cellvit_marker_array, other_marker_array_sub, gene_exp), file)
+
     if training_mode is None:
         ind_x_train = range(gene_exp.shape[0])
         y_train = gene_exp
@@ -184,10 +187,10 @@ def training(adata, pt_model_dir: str, radius, refine_factor, feature_pd_dir, tr
 
     radius /= refine_factor
 
-    train_coordx = other_marker_array_sub.iloc[
-                       ind_train_coord, other_marker_array_sub.columns.get_loc('lower_x_refined')] + radius
-    train_coordy = other_marker_array_sub.iloc[
-                       ind_train_coord, other_marker_array_sub.columns.get_loc('lower_y_refined')] + radius
+    train_coordx = np.array(other_marker_array_sub.iloc[
+                       ind_train_coord, other_marker_array_sub.columns.get_loc('lower_x_refined')] + radius)
+    train_coordy = np.array(other_marker_array_sub.iloc[
+                       ind_train_coord, other_marker_array_sub.columns.get_loc('lower_y_refined')] + radius)
 
     with open(f'./{sample_id}_training_data_level{refine_factor}.pickle', 'wb') as file:
         pickle.dump((x_train, y_train, train_coordx, train_coordy, x_train_scaled, other_marker_array_sub_final), file)

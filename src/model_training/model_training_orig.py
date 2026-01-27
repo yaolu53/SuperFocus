@@ -63,6 +63,9 @@ def training_orig(adata, pt_model_dir: str, radius, feature_list, save_model_dir
 
     cellvit_marker_array = np.hstack((codex_marker_array_sub, counts_marker_array_sub))
 
+    with open(f'./{sample_id}_full_data_level1.pickle', 'wb') as file:
+        pickle.dump((cellvit_marker_array, other_marker_array_sub, gene_exp), file)
+
     print(cellvit_marker_array.shape)
 
     if training_mode is None:
