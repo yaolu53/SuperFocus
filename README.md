@@ -8,7 +8,7 @@ This work is related to the manuscript at
 [https://doi.org/10.64898/2025.12.26.696575](https://doi.org/10.64898/2025.12.26.696575).
 Code to reproduce the results in the manuscript is in the `tutorials` folder.
 
-## Installation of SuperFocus （No AI access to the codebase)
+## Installation of SuperFocus
 
 Requires SuperFocus python environment and Linux x86-64 OS
 
